@@ -1,0 +1,10 @@
+﻿{
+    "profiles": {
+      "Uniquer (Unpackaged)": {
+        "commandName": "Project"
+      },
+      "Uniquer (Package)": {
+        "commandName": "MsixPackage"
+      }
+    }
+}
