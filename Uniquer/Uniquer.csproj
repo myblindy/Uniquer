@@ -8,10 +8,11 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;arm64</Platforms>
     <PublishProfile>Properties\PublishProfiles\win10-$(Platform).pubxml</PublishProfile>
-    <langversion>preview</langversion> 
-	<ImplicitUsings>enable</ImplicitUsings>
-	<Nullable>enable</Nullable>
-	<UseWinUI>true</UseWinUI>
+    <langversion>preview</langversion>
+    <TieredPGO>true</TieredPGO>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWinUI>true</UseWinUI>
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <WindowsPackageType>None</WindowsPackageType>
@@ -40,7 +41,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Uniquer.Core\Uniquer.Core.csproj" />
   </ItemGroup>
-  
+
   <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
     <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
   </PropertyGroup>

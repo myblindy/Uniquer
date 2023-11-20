@@ -1,7 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
-using System;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using Uniquer.Core.Helpers;
