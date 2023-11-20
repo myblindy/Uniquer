@@ -10,12 +10,20 @@ public class DbService
 
     class FileData
     {
-        public string FullPath { get; set; } = null!;
-        public byte[] Hash { get; set; } = null!;
-        public int Width { get; set; }
-        public int Height { get; set; }
+        public int Id { get; set; }
+        public required string FullPath { get; set; }
+        public required byte[] Hash { get; set; }
+        public required int Width { get; set; }
+        public required int Height { get; set; }
     }
     readonly ILiteCollection<FileData> fileDataCollection;
+
+    class SettingsData
+    {
+        public int Id { get; set; }
+        public string? BasePath { get; set; }
+    }
+    readonly ILiteCollection<SettingsData> settingsCollection;
 
     public DbService()
     {
@@ -23,6 +31,7 @@ public class DbService
         Directory.CreateDirectory(dbPath);
         db = new LiteDatabase(Path.Combine(dbPath, "storage.db"));
         fileDataCollection = db.GetCollection<FileData>("fileData");
+        settingsCollection = db.GetCollection<SettingsData>("settingsData");
     }
 
     public async Task<bool> FileExists(string path)
@@ -94,6 +103,28 @@ public class DbService
             var deletedAny = fileDataCollection.DeleteMany(x => x.FullPath == path) > 0;
             db.Commit();
             return deletedAny;
+        }
+    }
+
+    public async Task<string?> GetBasePathAsync()
+    {
+        using (await monitor.ReaderLockAsync())
+            return settingsCollection.Find(s => true, limit: 1).FirstOrDefault()?.BasePath;
+    }
+
+    public async Task SetBasePathAsync(string? newBasePath)
+    {
+        using (await monitor.WriterLockAsync())
+        {
+            var settings = settingsCollection.Find(s => true, limit: 1).FirstOrDefault();
+            if (settings == null)
+                settingsCollection.Insert(new SettingsData { BasePath = newBasePath });
+            else
+            {
+                settings.BasePath = newBasePath;
+                settingsCollection.Update(settings);
+            }
+            db.Commit();
         }
     }
 }

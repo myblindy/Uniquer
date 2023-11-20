@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml.Controls;
 
 using Uniquer.Activation;
 using Uniquer.Contracts.Services;
-using Uniquer.Views;
 
 namespace Uniquer.Services;
 

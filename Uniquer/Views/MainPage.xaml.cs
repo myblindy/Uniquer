@@ -1,7 +1,6 @@
-﻿using Microsoft.Extensions.Hosting;
-using Microsoft.UI.Xaml.Controls;
-using Uniquer.Services;
+﻿using Microsoft.UI.Xaml.Controls;
 using Uniquer.ViewModels;
+using Windows.Storage.Pickers;
 
 namespace Uniquer.Views;
 
@@ -12,7 +11,5 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
-        //ViewModel.BasePath = @"D:\temp\img-tst"; 
-        ViewModel.BasePath = @"E:\wallpapers\";
     }
 }

@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:controls="using:CommunityToolkit.WinUI.UI.Controls"
     xmlns:helpers="using:Uniquer.Helpers"
-    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+    Background="Transparent"
     mc:Ignorable="d" x:Name="RootPage">
 
     <Page.Resources>
@@ -21,13 +21,14 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <CommandBar Grid.Row="0" OverflowButtonVisibility="Collapsed" HorizontalAlignment="Left">
-            <AppBarButton Icon="Refresh" Label="Start" Command="{x:Bind ViewModel.StartCommand, Mode=OneTime}"/>
-            <AppBarButton Icon="Play" Label="Process Changes" Command="{x:Bind ViewModel.ProcessChangesCommand, Mode=OneTime}"/>
+        <CommandBar Grid.Row="0" OverflowButtonVisibility="Collapsed" HorizontalAlignment="Left" DefaultLabelPosition="Right">
+            <AppBarButton Icon="Folder" Label="Select Folder" Command="{x:Bind ViewModel.SelectFolderCommand}"/>
+            <AppBarButton Icon="Refresh" Label="Start" Command="{x:Bind ViewModel.StartCommand}"/>
+            <AppBarButton Icon="Play" Label="Process Changes" Command="{x:Bind ViewModel.ProcessChangesCommand}"/>
         </CommandBar>
 
         <Grid Grid.Row="1" ColumnSpacing="5" RowSpacing="5" VerticalAlignment="Stretch"
-              Visibility="{x:Bind helpers:MainPageViewHelpers.NotVisibility(ViewModel.IsProcessing), Mode=OneWay}">
+              Visibility="{x:Bind helpers:MainPageViewHelpers.NoneVisibility(ViewModel.StartCommand.IsRunning, ViewModel.ProcessChangesCommand.IsRunning), Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="400"/>
@@ -54,7 +55,7 @@
             </controls:DataGrid>
         </Grid>
 
-        <Grid Grid.Row="1" Visibility="{x:Bind ViewModel.IsProcessing, Mode=OneWay}">
+        <Grid Grid.Row="1" Visibility="{x:Bind helpers:MainPageViewHelpers.AnyVisibility(ViewModel.StartCommand.IsRunning, ViewModel.ProcessChangesCommand.IsRunning), Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="auto"/>
                 <RowDefinition Height="*"/>

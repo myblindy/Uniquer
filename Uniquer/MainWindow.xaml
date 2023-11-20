@@ -5,14 +5,16 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:windowex="using:WinUIEx" 
+    xmlns:helpers="using:Uniquer.Helpers"
     xmlns:views="using:Uniquer.Views"
     MinWidth="500"
     MinHeight="500"
     PersistenceId="MainWindow"
-    mc:Ignorable="d">
-    <windowex:WindowEx.Backdrop>
-        <windowex:MicaSystemBackdrop/>
-    </windowex:WindowEx.Backdrop>
+    mc:Ignorable="d"
+    Title="{x:Bind helpers:MainPageViewHelpers.GetWindowTitle(MainPage.ViewModel.BasePath), Mode=OneWay}">
+    <windowex:WindowEx.SystemBackdrop>
+        <MicaBackdrop/>
+    </windowex:WindowEx.SystemBackdrop>
 
-    <views:MainPage/>
+    <views:MainPage x:Name="MainPage"/>
 </windowex:WindowEx>

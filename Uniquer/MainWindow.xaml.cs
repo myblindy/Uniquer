@@ -1,6 +1,4 @@
-﻿using Uniquer.Helpers;
-
-namespace Uniquer;
+﻿namespace Uniquer;
 
 public sealed partial class MainWindow : WindowEx
 {
@@ -9,6 +7,5 @@ public sealed partial class MainWindow : WindowEx
         InitializeComponent();
 
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets/WindowIcon.ico"));
-        Title = "AppDisplayName".GetLocalized();
     }
 }

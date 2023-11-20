@@ -6,7 +6,6 @@ using Uniquer.Activation;
 using Uniquer.Contracts.Services;
 using Uniquer.Core.Contracts.Services;
 using Uniquer.Core.Services;
-using Uniquer.Helpers;
 using Uniquer.Services;
 using Uniquer.ViewModels;
 using Uniquer.Views;
@@ -60,6 +59,8 @@ public partial class App : Application
                 // Configuration
             })
             .Build();
+
+        RequestedTheme = ApplicationTheme.Dark;
 
         UnhandledException += App_UnhandledException;
     }
