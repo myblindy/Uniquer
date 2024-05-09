@@ -94,7 +94,7 @@ public class ImageComparisonService(DbService dbService)
 
             // push the new data to the local copy of the file data
             using (await allHashesMonitor.EnterAsync(ct).ConfigureAwait(false))
-                allFileData.Add((imagePath, hash, width, height, @new: true));
+                allFileData.Insert(0, (imagePath, hash, width, height, @new: true));
         }).ConfigureAwait(false);
 
         // step 3: find any duplicates (conflicts) in the local database, thus including old and new entries alike
