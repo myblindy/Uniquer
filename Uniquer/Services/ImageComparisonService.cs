@@ -5,18 +5,19 @@ using SixLabors.ImageSharp.Processing;
 using System.Collections.Concurrent;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using System.Threading.Tasks.Dataflow;
 using Uniquer.Models;
 
 namespace Uniquer.Services;
 
 public class ImageComparisonService(DbService dbService)
 {
-    static (byte[]? hash, int width, int height) CalculateImageHash(string imagePath)
+    static async Task<(byte[]? hash, int width, int height)> CalculateImageHash(string imagePath)
     {
         try
         {
             // open image in gray scale
-            using var image = Image.Load<Rgb24>(imagePath);
+            using var image = await Image.LoadAsync<Rgb24>(imagePath);
             var (width, height) = (image.Width, image.Height);
 
             // clone the image into a new smaller image with the correct aspect ratio and one gray scale channel
@@ -63,7 +64,6 @@ public class ImageComparisonService(DbService dbService)
 
         var diff = diffV128[0] + diffV128[1];
         var isDifferent = diff < hash1.Length * percentage;
-        if (isDifferent && diff != 0) { }
         return isDifferent;
     }
 
@@ -80,26 +80,36 @@ public class ImageComparisonService(DbService dbService)
             .Except(allFileData.Select(w => w.path)).ToList(), ct).ConfigureAwait(false);
 
         var index = 0;
-        await Parallel.ForEachAsync(newFiles, new ParallelOptions
-        {
-            CancellationToken = ct,
-            MaxDegreeOfParallelism = 64
-        }, async (imagePath, ct) =>
+        var hashNewImagesBlock = new TransformBlock<string, (string imagePath, byte[]? hash, int width, int height)>(async imagePath =>
         {
             percentageUpdate((double)Interlocked.Increment(ref index) / newFiles.Count / 2);
 
             // calculate the file's hash on the thread pool
-            var (hash, width, height) = CalculateImageHash(imagePath);
-            if (hash is null) return;
+            var (hash, width, height) = await CalculateImageHash(imagePath).ConfigureAwait(false);
+            return (imagePath, hash, width, height);
+        }, new() { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount * 8 });
 
-            // push the new data to the local copy of the file data
-            using (await allHashesMonitor.EnterAsync(ct).ConfigureAwait(false))
-                allFileData.Insert(0, (imagePath, hash, width, height, @new: true));
-        }).ConfigureAwait(false);
+        var insertNewHashesBlock = new ActionBlock<(string imagePath, byte[]? hash, int width, int height)>(async w =>
+        {
+            if (w.hash is not null)
+            {
+                using (await allHashesMonitor.EnterAsync().ConfigureAwait(false))
+                    allFileData.Add((w.imagePath, w.hash, w.width, w.height, true));
+                await dbService.SetFileDataAsync(w.imagePath, w.hash, w.width, w.height).ConfigureAwait(false);
+            }
+        }, new() { CancellationToken = ct });
+
+        var s2LinkOptions = new DataflowLinkOptions { PropagateCompletion = true };
+        hashNewImagesBlock.LinkTo(insertNewHashesBlock, s2LinkOptions);
+
+        foreach (var newFile in newFiles)
+            hashNewImagesBlock.Post(newFile);
+        hashNewImagesBlock.Complete();
+        await Task.WhenAll(hashNewImagesBlock.Completion, insertNewHashesBlock.Completion).ConfigureAwait(false);
 
         // step 3: find any duplicates (conflicts) in the local database, thus including old and new entries alike
         var results = new ConcurrentBag<ImagesDifference>();
-        await Parallel.ForEachAsync(Enumerable.Range(0, allFileData.Count), ct, async (i1, ct) =>
+        await Parallel.ForAsync(0, allFileData.Count, ct, async (i1, ct) =>
         {
             if (!allFileData[i1].@new || !allFileData[i1].path.StartsWith(basePath)) return;
 
@@ -113,11 +123,6 @@ public class ImageComparisonService(DbService dbService)
                         allFileData[i1].width * allFileData[i1].height < allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.RightBetter
                             : allFileData[i1].width * allFileData[i1].height > allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.LeftBetter : ImagesDifferenceType.Similar));
         }).ConfigureAwait(false);
-
-        // step 4: push all the new entries to the database
-        // TODO: should be done at the same time as step 3, but honestly it should be fast either way
-        await Task.WhenAll(allFileData.Where(w => w.@new)
-            .Select(w => dbService.SetFileDataAsync(w.path, w.hash, w.width, w.height))).ConfigureAwait(false);
 
         return results.ToArray();
     }
