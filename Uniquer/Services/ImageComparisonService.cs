@@ -79,49 +79,72 @@ public class ImageComparisonService(DbService dbService)
         var newFiles = await Task.Run(() => Directory.EnumerateFiles(basePath, "*", SearchOption.AllDirectories)
             .Except(allFileData.Select(w => w.path)).ToList(), ct).ConfigureAwait(false);
 
+        var loadNewImagesBlock = new TransformBlock<string, (string imagePath, Image<Rgb24>? image)>(async imagePath =>
+        {
+            try
+            {
+                return (imagePath, await Image.LoadAsync<Rgb24>(imagePath));
+            }
+            catch { return (imagePath, null); }
+        }, new() { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount * 8 });
+
         var index = 0;
-        var hashNewImagesBlock = new TransformBlock<string, (string imagePath, byte[]? hash, int width, int height)>(async imagePath =>
+        var hashNewImagesBlock = new ActionBlock<(string imagePath, Image<Rgb24>? image)>(async w =>
         {
             percentageUpdate((double)Interlocked.Increment(ref index) / newFiles.Count / 2);
 
-            // calculate the file's hash on the thread pool
-            var (hash, width, height) = await CalculateImageHash(imagePath).ConfigureAwait(false);
-            return (imagePath, hash, width, height);
-        }, new() { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount * 8 });
+            if (w.image is null) return;
 
-        var insertNewHashesBlock = new ActionBlock<(string imagePath, byte[]? hash, int width, int height)>(async w =>
-        {
-            if (w.hash is not null)
+            using (w.image)
             {
+                var (width, height) = (w.image.Width, w.image.Height);
+
+                // clone the image into a new smaller image with the correct aspect ratio and one gray scale channel
+                const int hashImageSize = 32;
+                w.image.Mutate(x => x.Resize(hashImageSize, hashImageSize));
+
+                // the hash is the image bytes
+                var hash = new byte[hashImageSize * hashImageSize];
+                w.image.ProcessPixelRows(data =>
+                {
+                    for (int y = 0; y < data.Height; ++y)
+                    {
+                        var rowSpan = data.GetRowSpan(y);
+                        for (int x = 0; x < rowSpan.Length; ++x)
+                            hash[y * data.Width + x] = (byte)((rowSpan[x].R + rowSpan[x].G + rowSpan[x].B) / 3);
+                    }
+                });
+
                 using (await allHashesMonitor.EnterAsync().ConfigureAwait(false))
-                    allFileData.Add((w.imagePath, w.hash, w.width, w.height, true));
-                await dbService.SetFileDataAsync(w.imagePath, w.hash, w.width, w.height).ConfigureAwait(false);
+                    allFileData.Insert(0, (w.imagePath, hash, width, height, true));
+                await dbService.SetFileDataAsync(w.imagePath, hash, width, height).ConfigureAwait(false);
             }
         }, new() { CancellationToken = ct });
 
         var s2LinkOptions = new DataflowLinkOptions { PropagateCompletion = true };
-        hashNewImagesBlock.LinkTo(insertNewHashesBlock, s2LinkOptions);
+        loadNewImagesBlock.LinkTo(hashNewImagesBlock, s2LinkOptions);
 
         foreach (var newFile in newFiles)
-            hashNewImagesBlock.Post(newFile);
-        hashNewImagesBlock.Complete();
-        await Task.WhenAll(hashNewImagesBlock.Completion, insertNewHashesBlock.Completion).ConfigureAwait(false);
+            await loadNewImagesBlock.SendAsync(newFile, ct).ConfigureAwait(false);
+        loadNewImagesBlock.Complete();
+        await Task.WhenAll(loadNewImagesBlock.Completion, hashNewImagesBlock.Completion).ConfigureAwait(false);
 
         // step 3: find any duplicates (conflicts) in the local database, thus including old and new entries alike
         var results = new ConcurrentBag<ImagesDifference>();
-        await Parallel.ForAsync(0, allFileData.Count, ct, async (i1, ct) =>
+        await Parallel.ForEachAsync(Enumerable.Range(0, allFileData.Count).Where(idx => allFileData[idx].@new && allFileData[idx].path.StartsWith(basePath)).Chunk(32), ct, async (i1s, ct) =>
         {
-            if (!allFileData[i1].@new || !allFileData[i1].path.StartsWith(basePath)) return;
+            foreach (var i1 in i1s)
+            {
+                percentageUpdate(.5 + (double)i1 / allFileData.Count / 2);
 
-            percentageUpdate(.5 + (double)i1 / allFileData.Count / 2);
-
-            for (int i2 = i1 + 1; i2 < allFileData.Count; ++i2)
-                if (allFileData[i2].path.StartsWith(basePath) && AreHashesClose(allFileData[i1].hash, allFileData[i2].hash))
-                    results.Add(new ImagesDifference(
-                        allFileData[i1].path, allFileData[i1].width, allFileData[i1].height,
-                        allFileData[i2].path, allFileData[i2].width, allFileData[i2].height,
-                        allFileData[i1].width * allFileData[i1].height < allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.RightBetter
-                            : allFileData[i1].width * allFileData[i1].height > allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.LeftBetter : ImagesDifferenceType.Similar));
+                for (int i2 = i1 + 1; i2 < allFileData.Count; ++i2)
+                    if (allFileData[i2].path.StartsWith(basePath) && AreHashesClose(allFileData[i1].hash, allFileData[i2].hash))
+                        results.Add(new ImagesDifference(
+                            allFileData[i1].path, allFileData[i1].width, allFileData[i1].height,
+                            allFileData[i2].path, allFileData[i2].width, allFileData[i2].height,
+                            allFileData[i1].width * allFileData[i1].height < allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.RightBetter
+                                : allFileData[i1].width * allFileData[i1].height > allFileData[i2].width * allFileData[i2].height ? ImagesDifferenceType.LeftBetter : ImagesDifferenceType.Similar));
+            }
         }).ConfigureAwait(false);
 
         return results.ToArray();
