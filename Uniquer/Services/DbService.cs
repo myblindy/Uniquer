@@ -72,28 +72,25 @@ public class DbService
                 .ToArray();
     }
 
-    public async Task SetFileDataAsync(string path, byte[] hash, int width, int height)
+    public void SetFileData(string path, byte[] hash, int width, int height)
     {
-        using (await monitor.WriterLockAsync())
-        {
-            var fileData = fileDataCollection.FindOne(x => x.FullPath == path);
-            if (fileData == null)
-                fileDataCollection.Insert(new FileData
-                {
-                    FullPath = path,
-                    Hash = hash,
-                    Width = width,
-                    Height = height
-                });
-            else
+        var fileData = fileDataCollection.FindOne(x => x.FullPath == path);
+        if (fileData == null)
+            fileDataCollection.Insert(new FileData
             {
-                fileData.Hash = hash;
-                fileDataCollection.Update(fileData);
-            }
-            db.Commit();
-            fileDataCollection.EnsureIndex(x => x.FullPath);
-            fileDataCollection.EnsureIndex(x => x.Hash);
+                FullPath = path,
+                Hash = hash,
+                Width = width,
+                Height = height
+            });
+        else
+        {
+            fileData.Hash = hash;
+            fileDataCollection.Update(fileData);
         }
+        db.Commit();
+        fileDataCollection.EnsureIndex(x => x.FullPath);
+        fileDataCollection.EnsureIndex(x => x.Hash);
     }
 
     public async Task<bool> DeleteFileEntryAsync(string path)

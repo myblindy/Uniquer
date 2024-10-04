@@ -73,61 +73,53 @@ public class ImageComparisonService(DbService dbService)
         var allFileData = await Task.Run(async () => (await dbService.GetAllFileDataAsync().ConfigureAwait(false))
             .Select(w => (w.path, w.hash, w.width, w.height, @new: false))
             .ToList()).ConfigureAwait(false);
-        var allHashesMonitor = new AsyncMonitor();
 
         // step 2: process any new images and add them to the local db
         var newFiles = await Task.Run(() => Directory.EnumerateFiles(basePath, "*", SearchOption.AllDirectories)
             .Except(allFileData.Select(w => w.path)).ToList(), ct).ConfigureAwait(false);
 
-        var loadNewImagesBlock = new TransformBlock<string, (string imagePath, Image<Rgb24>? image)>(async imagePath =>
+        var index = 0;
+        var newAllFileData = new ConcurrentBag<(string path, byte[] hash, int width, int height, bool @new)>();
+
+        await Parallel.ForEachAsync(newFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount * 2, CancellationToken = ct }, async (imagePath, ct) =>
         {
             try
             {
-                return (imagePath, await Image.LoadAsync<Rgb24>(imagePath));
-            }
-            catch { return (imagePath, null); }
-        }, new() { CancellationToken = ct, MaxDegreeOfParallelism = Environment.ProcessorCount * 8 });
+                var image = await Image.LoadAsync<Rgb24>(imagePath, ct);
 
-        var index = 0;
-        var hashNewImagesBlock = new ActionBlock<(string imagePath, Image<Rgb24>? image)>(async w =>
-        {
-            percentageUpdate((double)Interlocked.Increment(ref index) / newFiles.Count / 2);
+                percentageUpdate((double)Interlocked.Increment(ref index) / newFiles.Count / 2);
 
-            if (w.image is null) return;
+                if (image is null) return;
 
-            using (w.image)
-            {
-                var (width, height) = (w.image.Width, w.image.Height);
-
-                // clone the image into a new smaller image with the correct aspect ratio and one gray scale channel
-                const int hashImageSize = 32;
-                w.image.Mutate(x => x.Resize(hashImageSize, hashImageSize));
-
-                // the hash is the image bytes
-                var hash = new byte[hashImageSize * hashImageSize];
-                w.image.ProcessPixelRows(data =>
+                using (image)
                 {
-                    for (int y = 0; y < data.Height; ++y)
+                    var (width, height) = (image.Width, image.Height);
+
+                    // clone the image into a new smaller image with the correct aspect ratio and one gray scale channel
+                    const int hashImageSize = 32;
+                    image.Mutate(x => x.Resize(hashImageSize, hashImageSize));
+
+                    // the hash is the image bytes
+                    var hash = new byte[hashImageSize * hashImageSize];
+                    image.ProcessPixelRows(data =>
                     {
-                        var rowSpan = data.GetRowSpan(y);
-                        for (int x = 0; x < rowSpan.Length; ++x)
-                            hash[y * data.Width + x] = (byte)((rowSpan[x].R + rowSpan[x].G + rowSpan[x].B) / 3);
-                    }
-                });
+                        for (int y = 0; y < data.Height; ++y)
+                        {
+                            var rowSpan = data.GetRowSpan(y);
+                            for (int x = 0; x < rowSpan.Length; ++x)
+                                hash[y * data.Width + x] = (byte)((rowSpan[x].R + rowSpan[x].G + rowSpan[x].B) / 3);
+                        }
+                    });
 
-                using (await allHashesMonitor.EnterAsync().ConfigureAwait(false))
-                    allFileData.Insert(0, (w.imagePath, hash, width, height, true));
-                await dbService.SetFileDataAsync(w.imagePath, hash, width, height).ConfigureAwait(false);
+                    newAllFileData.Add((imagePath, hash, width, height, true));
+                    dbService.SetFileData(imagePath, hash, width, height);
+                }
             }
-        }, new() { CancellationToken = ct });
+            catch { }
+        });
 
-        var s2LinkOptions = new DataflowLinkOptions { PropagateCompletion = true };
-        loadNewImagesBlock.LinkTo(hashNewImagesBlock, s2LinkOptions);
-
-        foreach (var newFile in newFiles)
-            await loadNewImagesBlock.SendAsync(newFile, ct).ConfigureAwait(false);
-        loadNewImagesBlock.Complete();
-        await Task.WhenAll(loadNewImagesBlock.Completion, hashNewImagesBlock.Completion).ConfigureAwait(false);
+        foreach (var w in newAllFileData)
+            allFileData.Insert(0, w);
 
         // step 3: find any duplicates (conflicts) in the local database, thus including old and new entries alike
         var results = new ConcurrentBag<ImagesDifference>();
